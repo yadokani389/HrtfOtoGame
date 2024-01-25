@@ -39,15 +39,12 @@ Array<Array<Array<float>>> getHRTF(void) {
   return HRTF;
 }
 
-Wave makeHRTF(const Audio &audio, const Array<Array<Array<float>>> &HRTF) {
-  Wave wave{audio.samples()};
-  auto samples = audio.getSamples(0);
+Wave makeHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HRTF, int32 theta) {
+  Wave wave{samples.size()};
   fftsg::RFFTEngine<float> rfft(MEASUREMENT_PINTS * 2);
+  theta %= 360;
 
-  for (size_t i = 0; i < audio.samples() / CHG_LEN + 1; i++) {
-    int theta = ANGULAR_VELOCITY * i * CHG_LEN / audio.sampleRate();
-    theta %= 360;
-
+  for (size_t i = 0; i < samples.size() / CHG_LEN; i++) {
     float m = (float)theta / 5;
     int m1 = m, m2 = m + 1;
     if (m2 == 72)
@@ -55,12 +52,12 @@ Wave makeHRTF(const Audio &audio, const Array<Array<Array<float>>> &HRTF) {
     float r2 = m - (int)m;
     float r1 = 1.f - r2;
 
-    Array<float> audio_N(samples + i * CHG_LEN, samples + i * CHG_LEN + MEASUREMENT_PINTS), buff(MEASUREMENT_PINTS, 0);
+    Array<float> audio_N(samples.begin() + i * CHG_LEN, samples.end() + i * CHG_LEN + MEASUREMENT_PINTS), buff(MEASUREMENT_PINTS, 0);
     audio_N.insert(audio_N.end(), buff.begin(), buff.end());
     rfft.rfft(audio_N.data());
 
-    auto Y1 = HRTF[0][m1].map([&](float h) { return r1 * h; });
-    auto Y2 = HRTF[0][m2].map([&](float h) { return r2 * h; });
+    auto Y1 = HRTF[0][m1].map([r1](float h) { return r1 * h; });
+    auto Y2 = HRTF[0][m2].map([r2](float h) { return r2 * h; });
     for (size_t j = 0; j < Y1.size(); j++)
       Y1[j] = (Y1[j] + Y2[j]) * audio_N[j];
 
@@ -68,8 +65,8 @@ Wave makeHRTF(const Audio &audio, const Array<Array<Array<float>>> &HRTF) {
     for (size_t j = 0; j < 2 * MEASUREMENT_PINTS; j++)
       wave[i * CHG_LEN + j].left += Y1[j];
 
-    Y1 = HRTF[1][m1].map([&](float h) { return r1 * h; });
-    Y2 = HRTF[1][m2].map([&](float h) { return r2 * h; });
+    Y1 = HRTF[0][m1].map([r1](float h) { return r1 * h; });
+    Y2 = HRTF[1][m2].map([r2](float h) { return r2 * h; });
     for (size_t j = 0; j < Y1.size(); j++)
       Y1[j] = (Y1[j] + Y2[j]) * audio_N[j];
 
@@ -81,11 +78,81 @@ Wave makeHRTF(const Audio &audio, const Array<Array<Array<float>>> &HRTF) {
   return wave;
 }
 
+auto HRTF = getHRTF();
+class MyAudioStream : public IAudioStream {
+ public:
+  void setFrequency(int32 frequency) {
+    m_oldFrequency = m_frequency.load();
+
+    m_frequency.store(frequency);
+  }
+
+  void setTheta(int32 theta) {
+    m_theta = theta;
+  }
+
+ private:
+  size_t m_pos = 0;
+
+  std::atomic<int32> m_oldFrequency = 440;
+
+  std::atomic<int32> m_frequency = 440;
+
+  int32 m_theta = 0;
+
+  void getAudio(float *left, float *right, const size_t samplesToWrite) override {
+    const int32 oldFrequency = m_oldFrequency;
+    const int32 frequency = m_frequency;
+    const float blend = (1.0f / samplesToWrite);
+
+    Array<float> samples;
+    for (size_t i = 0; i < samplesToWrite; i++) {
+      const float t0 = (2_piF * oldFrequency * (static_cast<float>(m_pos) / Wave::DefaultSampleRate));
+      const float t1 = (2_piF * frequency * (static_cast<float>(m_pos) / Wave::DefaultSampleRate));
+      const float a = (Math::Lerp(std::sin(t0), std::sin(t1), (blend * i))) * 0.5f;
+
+      samples.emplace_back(a);
+
+      m_pos++;
+    }
+
+    auto wave = makeHRTF(samples, HRTF, m_theta);
+    for (size_t i = 0; i < samplesToWrite; i++) {
+      *left++ = wave[i].left;
+      *right++ = wave[i].right;
+    }
+
+    m_oldFrequency = frequency;
+
+    m_pos %= Math::LCM(frequency, Wave::DefaultSampleRate);
+  }
+
+  bool hasEnded() override {
+    return false;
+  }
+
+  void rewind() override {
+    m_pos = 0;
+  }
+};
+
 void Main(void) {
-  auto HRTF = getHRTF();
-  const Audio audio{U"output.wav"};
-  const Audio sound{makeHRTF(audio, HRTF)};
-  sound.play();
+  // const Audio audio{U"output.wav"};
+  // Array<float> samples{audio.getSamples(0), audio.getSamples(0) + audio.samples()};
+  // const Audio sound{makeHRTF(samples, HRTF, 90)};
+  // sound.play();
+  std::shared_ptr<MyAudioStream> audioStream = std::make_shared<MyAudioStream>();
+
+  Audio ss{audioStream};
+  ss.play();
+  double frequency = 440.0, theta = 0.0;
+
   while (System::Update()) {
+    if (SimpleGUI::Slider(U"{}Hz"_fmt(static_cast<int32>(frequency)), frequency, 220.0, 880.0, Vec2{40, 40}, 120, 200)) {
+      audioStream->setFrequency(static_cast<int32>(frequency));
+    }
+    if (SimpleGUI::Slider(U"theta:{}"_fmt(static_cast<int32>(theta)), theta, 0.0, 360.0, Vec2{40, 80}, 120, 200)) {
+      audioStream->setTheta(static_cast<int32>(theta));
+    }
   }
 }
