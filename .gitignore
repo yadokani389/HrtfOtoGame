@@ -1,0 +1,8 @@
+/build
+/.vscode
+/.cache
+/resources
+/hrtfs
+HrtfOtoGame
+.clang-format
+compile_commands.json
