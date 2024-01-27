@@ -1,4 +1,6 @@
 #include <Siv3D.hpp>
+#include <Siv3D/Duration.hpp>
+#include <Siv3D/System.hpp>
 
 #include "fftsg/rfft_engine.hpp"
 
@@ -44,11 +46,10 @@ Wave makeHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HRT
   fftsg::RFFTEngine<float> rfft(MEASUREMENT_PINTS * 2);
   theta %= 360;
 
-  for (size_t i = 0; i < samples.size() / CHG_LEN; i++) {
+  for (size_t i = 0; i < samples.size() / CHG_LEN + 1; i++) {
     float m = (float)theta / 5;
     int m1 = m, m2 = m + 1;
-    if (m2 == 72)
-      m2 = 0;
+    m2 %= 72;
     float r2 = m - (int)m;
     float r1 = 1.f - r2;
 
@@ -65,7 +66,7 @@ Wave makeHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HRT
     for (size_t j = 0; j < 2 * MEASUREMENT_PINTS; j++)
       wave[i * CHG_LEN + j].left += Y1[j];
 
-    Y1 = HRTF[0][m1].map([r1](float h) { return r1 * h; });
+    Y1 = HRTF[1][m1].map([r1](float h) { return r1 * h; });
     Y2 = HRTF[1][m2].map([r2](float h) { return r2 * h; });
     for (size_t j = 0; j < Y1.size(); j++)
       Y1[j] = (Y1[j] + Y2[j]) * audio_N[j];
@@ -88,7 +89,7 @@ class MyAudioStream : public IAudioStream {
   }
 
   void setTheta(int32 theta) {
-    m_theta = theta;
+    m_theta.store(theta);
   }
 
  private:
@@ -98,7 +99,7 @@ class MyAudioStream : public IAudioStream {
 
   std::atomic<int32> m_frequency = 440;
 
-  int32 m_theta = 0;
+  std::atomic<int32> m_theta = 0;
 
   void getAudio(float *left, float *right, const size_t samplesToWrite) override {
     const int32 oldFrequency = m_oldFrequency;
@@ -118,8 +119,8 @@ class MyAudioStream : public IAudioStream {
 
     auto wave = makeHRTF(samples, HRTF, m_theta);
     for (size_t i = 0; i < samplesToWrite; i++) {
-      *left++ = wave[i].left;
-      *right++ = wave[i].right;
+      *left++ = samples[i];
+      *right++ = samples[i];
     }
 
     m_oldFrequency = frequency;
@@ -144,6 +145,7 @@ void Main(void) {
   std::shared_ptr<MyAudioStream> audioStream = std::make_shared<MyAudioStream>();
 
   Audio ss{audioStream};
+  ss.setVolume(0.1);
   ss.play();
   double frequency = 440.0, theta = 0.0;
 
