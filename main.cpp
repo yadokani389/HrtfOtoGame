@@ -1,6 +1,4 @@
 #include <Siv3D.hpp>
-#include <Siv3D/Duration.hpp>
-#include <Siv3D/System.hpp>
 
 #include "fftsg/rfft_engine.hpp"
 
@@ -19,14 +17,14 @@ Array<Array<Array<float>>> getHRTF(void) {
     int j = 0;
     String s_line;
     while (reader.readLine(s_line))
-      hrirL[i][j++] = (Parse<float>(s_line));
+      hrirL[i][j++] = Parse<float>(s_line);
 
     reader.open(U"hrtfs/elev{}/R{}e{:0>3}a.dat"_fmt(ELEV, ELEV, i * 5));
     if (!reader)
       throw Error{U"Failed to open hrtf file"};
     j = 0;
     while (reader.readLine(s_line))
-      hrirR[i][j++] = (Parse<float>(s_line));
+      hrirR[i][j++] = Parse<float>(s_line);
   }
 
   Array<Array<Array<float>>> HRTF(2, Array<Array<float>>(72, Array<float>(MEASUREMENT_PINTS + 1, 0)));
@@ -42,7 +40,7 @@ Array<Array<Array<float>>> getHRTF(void) {
 }
 
 Wave applyHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HRTF, int32 theta) {
-  Wave wave{samples.size()};
+  Wave wave{samples.size() + 2 * MEASUREMENT_PINTS};
   fftsg::RFFTEngine<float> rfft(MEASUREMENT_PINTS * 2);
   theta %= 360;
 
@@ -119,8 +117,8 @@ class MyAudioStream : public IAudioStream {
 
     auto wave = applyHRTF(samples, HRTF, m_theta);
     for (size_t i = 0; i < samplesToWrite; i++) {
-      *left++ = samples[i];
-      *right++ = samples[i];
+      *left++ = wave[i].left;
+      *right++ = wave[i].right;
     }
 
     m_oldFrequency = frequency;
@@ -139,8 +137,14 @@ class MyAudioStream : public IAudioStream {
 
 void Main(void) {
   // const Audio audio{U"output.wav"};
-  // Array<float> samples{audio.getSamples(0), audio.getSamples(0) + audio.samples()};
-  // const Audio sound{applyHRTF(samples, HRTF, 90)};
+  // Wave s;
+  // auto left = audio.samples();
+  // for (int i = 0; i <= 36; i++) {
+  //   auto size = audio.samples() / 37;
+  //   Array<float> samples{audio.getSamples(0) + size * i, audio.getSamples(0) + size * (i + 1)};
+  //   s.append(applyHRTF(samples, HRTF, i * 10));
+  // }
+  // const Audio sound{s};
   // sound.play();
   std::shared_ptr<MyAudioStream> audioStream = std::make_shared<MyAudioStream>();
 
