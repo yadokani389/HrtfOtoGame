@@ -41,7 +41,7 @@ Array<Array<Array<float>>> getHRTF(void) {
   return HRTF;
 }
 
-Wave makeHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HRTF, int32 theta) {
+Wave applyHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HRTF, int32 theta) {
   Wave wave{samples.size()};
   fftsg::RFFTEngine<float> rfft(MEASUREMENT_PINTS * 2);
   theta %= 360;
@@ -117,7 +117,7 @@ class MyAudioStream : public IAudioStream {
       m_pos++;
     }
 
-    auto wave = makeHRTF(samples, HRTF, m_theta);
+    auto wave = applyHRTF(samples, HRTF, m_theta);
     for (size_t i = 0; i < samplesToWrite; i++) {
       *left++ = samples[i];
       *right++ = samples[i];
@@ -140,7 +140,7 @@ class MyAudioStream : public IAudioStream {
 void Main(void) {
   // const Audio audio{U"output.wav"};
   // Array<float> samples{audio.getSamples(0), audio.getSamples(0) + audio.samples()};
-  // const Audio sound{makeHRTF(samples, HRTF, 90)};
+  // const Audio sound{applyHRTF(samples, HRTF, 90)};
   // sound.play();
   std::shared_ptr<MyAudioStream> audioStream = std::make_shared<MyAudioStream>();
 
