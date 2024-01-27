@@ -39,20 +39,17 @@ Array<Array<Array<float>>> getHRTF(void) {
   return HRTF;
 }
 
-Wave applyHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HRTF, int32 theta) {
-  Wave wave{samples.size() + 2 * MEASUREMENT_PINTS};
-  fftsg::RFFTEngine<float> rfft(MEASUREMENT_PINTS * 2);
+Wave applyHRTF(const Array<float> &samples, int32 sampleRate, const Array<Array<Array<float>>> &HRTF, int32 theta) {
+  Wave wave{samples.size() + MEASUREMENT_PINTS};
+  fftsg::RFFTEngine<float> rfft(MEASUREMENT_PINTS);
+
   theta %= 360;
-
+  const float m = (float)theta / 5;
+  const int m1 = m, m2 = int(m + 1) % 72;
+  const float r2 = m - (int)m;
+  const float r1 = 1.f - r2;
   for (size_t i = 0; i < samples.size() / CHG_LEN + 1; i++) {
-    float m = (float)theta / 5;
-    int m1 = m, m2 = m + 1;
-    m2 %= 72;
-    float r2 = m - (int)m;
-    float r1 = 1.f - r2;
-
-    Array<float> audio_N(samples.begin() + i * CHG_LEN, samples.end() + i * CHG_LEN + MEASUREMENT_PINTS), buff(MEASUREMENT_PINTS, 0);
-    audio_N.insert(audio_N.end(), buff.begin(), buff.end());
+    Array<float> audio_N(samples.begin() + i * CHG_LEN, samples.end() + i * CHG_LEN + MEASUREMENT_PINTS);
     rfft.rfft(audio_N.data());
 
     auto Y1 = HRTF[0][m1].map([r1](float h) { return r1 * h; });
@@ -61,7 +58,7 @@ Wave applyHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HR
       Y1[j] = (Y1[j] + Y2[j]) * audio_N[j];
 
     rfft.irfft(Y1.data());
-    for (size_t j = 0; j < 2 * MEASUREMENT_PINTS; j++)
+    for (size_t j = 0; j < MEASUREMENT_PINTS; j++)
       wave[i * CHG_LEN + j].left += Y1[j];
 
     Y1 = HRTF[1][m1].map([r1](float h) { return r1 * h; });
@@ -70,7 +67,7 @@ Wave applyHRTF(const Array<float> &samples, const Array<Array<Array<float>>> &HR
       Y1[j] = (Y1[j] + Y2[j]) * audio_N[j];
 
     rfft.irfft(Y1.data());
-    for (size_t j = 0; j < 2 * MEASUREMENT_PINTS; j++)
+    for (size_t j = 0; j < MEASUREMENT_PINTS; j++)
       wave[i * CHG_LEN + j].right += Y1[j];
   }
 
@@ -115,7 +112,7 @@ class MyAudioStream : public IAudioStream {
       m_pos++;
     }
 
-    auto wave = applyHRTF(samples, HRTF, m_theta);
+    auto wave = applyHRTF(samples, Wave::DefaultSampleRate, HRTF, m_theta);
     for (size_t i = 0; i < samplesToWrite; i++) {
       *left++ = wave[i].left;
       *right++ = wave[i].right;
@@ -144,7 +141,8 @@ void Main(void) {
   //   Array<float> samples{audio.getSamples(0) + size * i, audio.getSamples(0) + size * (i + 1)};
   //   s.append(applyHRTF(samples, HRTF, i * 10));
   // }
-  // const Audio sound{s};
+  // Array<float> samples(audio.getSamples(0), audio.getSamples(0) + audio.samples());
+  // const Audio sound{applyHRTF(samples, audio.sampleRate(), HRTF, 0)};
   // sound.play();
   std::shared_ptr<MyAudioStream> audioStream = std::make_shared<MyAudioStream>();
 
